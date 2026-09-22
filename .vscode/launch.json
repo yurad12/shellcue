@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:새 프로젝트}",
+            "name": "Debug ShellCue",
+            "target": "ShellCue",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug ShellCue"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:새 프로젝트}",
+            "name": "Release ShellCue",
+            "target": "ShellCue",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release ShellCue"
+        }
+    ]
+}
