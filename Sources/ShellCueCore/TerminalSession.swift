@@ -53,17 +53,23 @@ public struct TerminalSessionSnapshot: Identifiable, Hashable, Sendable {
     public let target: TerminalTarget
     public let title: String
     public let state: ObservedSessionState
+    public let workingDirectory: String?
+    public let activeCommand: String?
 
     public init(
         id: String,
         target: TerminalTarget,
         title: String,
-        state: ObservedSessionState
+        state: ObservedSessionState,
+        workingDirectory: String? = nil,
+        activeCommand: String? = nil
     ) {
         self.id = id
         self.target = target
         self.title = title
         self.state = state
+        self.workingDirectory = workingDirectory
+        self.activeCommand = activeCommand
     }
 }
 
@@ -73,4 +79,3 @@ public protocol TerminalAdapter {
     func discoverSessions() throws -> [TerminalSessionSnapshot]
     func focus(_ target: TerminalTarget) throws
 }
-

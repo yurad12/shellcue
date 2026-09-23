@@ -11,7 +11,10 @@ public struct ITermAdapter: TerminalAdapter {
 
     public func discoverSessions() throws -> [TerminalSessionSnapshot] {
         let output = try runner.run(Self.discoveryScript)
-        return try AppleScriptRecordParser.parse(output, fields: 6).map { fields in
+        let records = try AppleScriptRecordParser.parse(output, fields: 6)
+        let processContexts = TTYProcessInspector().contexts(for: records.map { $0[2] })
+
+        return try records.map { fields in
             guard let windowID = Int(fields[0]) else {
                 throw TerminalAdapterError.malformedOutput(fields.joined(separator: "|"))
             }
@@ -21,7 +24,10 @@ public struct ITermAdapter: TerminalAdapter {
             let title = fields[3].isEmpty ? "새 iTerm 세션" : fields[3]
             let isProcessing = fields[4] == "true"
             let isAtPrompt = fields[5] == "true"
-            let state: ObservedSessionState = isAtPrompt ? .waiting : (isProcessing ? .running : .unknown)
+            let processContext = processContexts[tty]
+            let state: ObservedSessionState = isAtPrompt
+                ? .waiting
+                : (isProcessing ? .running : (processContext?.state ?? .unknown))
             let target = TerminalTarget(
                 terminal: .iTerm2,
                 windowID: windowID,
@@ -32,7 +38,9 @@ public struct ITermAdapter: TerminalAdapter {
                 id: "iterm:\(sessionID)",
                 target: target,
                 title: title,
-                state: state
+                state: state,
+                workingDirectory: processContext?.workingDirectory,
+                activeCommand: processContext?.activeCommand
             )
         }
     }

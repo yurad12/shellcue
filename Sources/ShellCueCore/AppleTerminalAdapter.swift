@@ -11,12 +11,16 @@ public struct AppleTerminalAdapter: TerminalAdapter {
 
     public func discoverSessions() throws -> [TerminalSessionSnapshot] {
         let output = try runner.run(Self.discoveryScript)
-        return try AppleScriptRecordParser.parse(output, fields: 5).map { fields in
+        let records = try AppleScriptRecordParser.parse(output, fields: 5)
+        let processContexts = TTYProcessInspector().contexts(for: records.map { $0[2] })
+
+        return try records.map { fields in
             guard let windowID = Int(fields[0]), let tabIndex = Int(fields[1]) else {
                 throw TerminalAdapterError.malformedOutput(fields.joined(separator: "|"))
             }
 
             let tty = fields[2]
+            let processContext = processContexts[tty]
             let title = fields[3].isEmpty ? "새 터미널" : fields[3]
             let state: ObservedSessionState = fields[4] == "true" ? .running : .waiting
             let target = TerminalTarget(
@@ -29,7 +33,9 @@ public struct AppleTerminalAdapter: TerminalAdapter {
                 id: "terminal:\(windowID):\(tabIndex):\(tty)",
                 target: target,
                 title: title,
-                state: state
+                state: state,
+                workingDirectory: processContext?.workingDirectory,
+                activeCommand: processContext?.activeCommand
             )
         }
     }
