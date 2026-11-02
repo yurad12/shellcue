@@ -15,6 +15,6 @@ ShellCue is a menu bar app that helps people find open Terminal and iTerm2 sessi
 
 - Read `README.md` for usage and development commands, and `docs/BACKLOG.md` for remaining work.
 - Work on one problem at a time. When behavior changes, update the related instructions too.
-- Add tests where needed for logic changes. Run `swift test` before finishing.
-- Check terminal connections and UI changes in the actual app. Report test results and real app checks separately.
+- Do not add automated tests for now. Run `swift build` before finishing.
+- Check terminal connections and UI changes in the actual app. Report build results and real app checks separately.
 - Keep the README focused on the product and how to use it. Keep remaining work in BACKLOG, in Korean. Use Git for completed work and change history.

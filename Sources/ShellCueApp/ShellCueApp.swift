@@ -16,6 +16,7 @@ private final class ShellCueAppDelegate: NSObject, NSApplicationDelegate {
     private let popover = NSPopover()
     private var statusItem: NSStatusItem?
     private var outsideClickMonitor: Any?
+    private var panelShortcut: PanelShortcut?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let content = SessionListView(store: store, onClose: { [weak self] in self?.closePopover() })
@@ -37,6 +38,10 @@ private final class ShellCueAppDelegate: NSObject, NSApplicationDelegate {
         item.button?.target = self
         item.button?.action = #selector(togglePopover)
         statusItem = item
+        let shortcut = PanelShortcut { [weak self] in self?.togglePopover() }
+        store.shortcutAvailable = shortcut.register()
+        panelShortcut = shortcut
+        item.button?.toolTip = "ShellCue · ⌃⌥Space"
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] event in
@@ -65,6 +70,7 @@ private final class ShellCueAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        panelShortcut?.unregister()
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
     }
 
@@ -77,6 +83,8 @@ private final class ShellCueAppDelegate: NSObject, NSApplicationDelegate {
         if popover.isShown {
             closePopover()
         } else {
+            store.prepareForPanelOpening()
+            NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
@@ -93,7 +101,14 @@ final class SessionStore {
     var sessions: [TerminalSessionSnapshot] = []
     var projectsBySessionID: [String: DetectedProject] = [:]
     var annotations: [String: SessionAnnotation] = [:]
-    var query = ""
+    var query = "" {
+        didSet {
+            if oldValue != query { selectedSessionID = orderedFilteredSessions.first?.id }
+        }
+    }
+    var selectedSessionID: String?
+    var searchFocusRequest = 0
+    var shortcutAvailable = true
     var editingDraft: SessionEditingDraft?
     private(set) var refreshErrorMessage: String?
     private(set) var operationErrorMessage: String?
@@ -104,6 +119,36 @@ final class SessionStore {
         operationErrorMessage ?? refreshErrorMessage
     }
 
+    var orderedFilteredSessions: [TerminalSessionSnapshot] {
+        filteredGroups.flatMap(\.sessions)
+    }
+
+    func prepareForPanelOpening() {
+        guard editingDraft == nil else { return }
+        query = ""
+        selectedSessionID = orderedFilteredSessions.first?.id
+        searchFocusRequest += 1
+    }
+
+    func moveSelection(_ offset: Int) {
+        let visible = orderedFilteredSessions
+        guard !visible.isEmpty else { selectedSessionID = nil; return }
+        guard let index = visible.firstIndex(where: { $0.id == selectedSessionID }) else {
+            selectedSessionID = offset < 0 ? visible.last?.id : visible.first?.id
+            return
+        }
+        selectedSessionID = visible[min(max(index + offset, 0), visible.count - 1)].id
+    }
+
+    func focusSelectedSession() -> Bool {
+        guard let id = selectedSessionID else { return false }
+        guard let session = orderedFilteredSessions.first(where: { $0.id == id }) else {
+            operationErrorMessage = "선택한 세션이 더 이상 목록에 없습니다. 다시 선택하세요."
+            return false
+        }
+        return focus(session)
+    }
+
     func beginEditing(_ session: TerminalSessionSnapshot) {
         guard editingDraft == nil else { return }
         editingDraft = SessionEditingDraft(session: session, annotation: annotation(for: session))
@@ -112,6 +157,7 @@ final class SessionStore {
     func cancelEditing() {
         editingDraft = nil
         operationErrorMessage = nil
+        searchFocusRequest += 1
     }
 
     @discardableResult
@@ -120,6 +166,7 @@ final class SessionStore {
               saveAnnotation(for: draft.session, purpose: draft.purpose, nextAction: draft.nextAction)
         else { return false }
         editingDraft = nil
+        searchFocusRequest += 1
         return true
     }
 
@@ -154,6 +201,7 @@ final class SessionStore {
     }
 
     var filteredGroups: [SessionGroup] {
+        let order = Dictionary(uniqueKeysWithValues: sessions.enumerated().map { ($1.id, $0) })
         let grouped = Dictionary(grouping: filteredSessions) { session in
             projectsBySessionID[session.id]?.rootPath ?? "__unknown__"
         }
@@ -165,11 +213,14 @@ final class SessionStore {
                 path: project?.rootPath,
                 isGitRepository: project?.isGitRepository ?? false,
                 sessions: sessions.sorted {
-                    displayTitle(for: $0).localizedStandardCompare(displayTitle(for: $1)) == .orderedAscending
+                    (order[$0.id] ?? 0) < (order[$1.id] ?? 0)
                 }
             )
         }
-        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        .sorted {
+            let comparison = $0.name.localizedStandardCompare($1.name)
+            return comparison == .orderedSame ? $0.id < $1.id : comparison == .orderedAscending
+        }
     }
 
     func annotation(for session: TerminalSessionSnapshot) -> SessionAnnotation {
@@ -240,7 +291,14 @@ final class SessionStore {
             }
         }
 
-        sessions = discoveredSessions
+        // Keep surviving sessions in place; append newly discovered sessions.
+        let oldOrder = Dictionary(uniqueKeysWithValues: sessions.enumerated().map { ($1.id, $0) })
+        sessions = discoveredSessions.enumerated().sorted {
+            (oldOrder[$0.element.id] ?? (oldOrder.count + $0.offset))
+                < (oldOrder[$1.element.id] ?? (oldOrder.count + $1.offset))
+        }.map(\.element)
+        // Do not silently select a different target when the selected one closes.
+        if selectedSessionID == nil { selectedSessionID = orderedFilteredSessions.first?.id }
         projectsBySessionID = Dictionary(uniqueKeysWithValues: sessions.compactMap { session in
             guard let workingDirectory = session.workingDirectory else { return nil }
             return (session.id, projectDetector.detect(from: workingDirectory))
@@ -330,14 +388,19 @@ private struct SessionListView: View {
             if store.filteredSessions.isEmpty {
                 emptyState
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(store.filteredGroups) { group in
-                            projectSection(group)
+                ScrollViewReader { scroll in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 14) {
+                            ForEach(store.filteredGroups) { group in
+                                projectSection(group)
+                            }
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
+                    .onChange(of: store.selectedSessionID) { _, id in
+                        if let id { scroll.scrollTo(id) }
+                    }
                 }
             }
         }
@@ -345,7 +408,13 @@ private struct SessionListView: View {
 
     @ViewBuilder
     private var emptyState: some View {
-        if !store.deniedTerminalKinds.isEmpty {
+        if !store.sessions.isEmpty, !store.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            ContentUnavailableView(
+                "검색 결과가 없어요",
+                systemImage: "magnifyingglass",
+                description: Text("다른 이름이나 메모로 검색해 보세요.")
+            )
+        } else if !store.deniedTerminalKinds.isEmpty {
             ContentUnavailableView {
                 Label(
                     "터미널 접근 권한이 필요해요",
@@ -422,6 +491,13 @@ private struct SessionListView: View {
             .help("용도와 다음 할 일 편집")
         }
         .padding(.horizontal, 8)
+        .background {
+            if store.selectedSessionID == session.id {
+                RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.16))
+            }
+        }
+        .accessibilityAddTraits(store.selectedSessionID == session.id ? .isSelected : [])
+        .id(session.id)
     }
 
     private var header: some View {
@@ -440,6 +516,7 @@ private struct SessionListView: View {
             .disabled(store.isRefreshing)
             .help("새로고침")
             Menu {
+                Text(store.shortcutAvailable ? "패널 열기/닫기 · ⌃⌥Space" : "⌃⌥Space 단축키를 사용할 수 없어요")
                 Button("ShellCue 종료") {
                     NSApplication.shared.terminate(nil)
                 }
@@ -455,8 +532,12 @@ private struct SessionListView: View {
     }
 
     private var searchField: some View {
-        TextField("세션 검색", text: $store.query)
-            .textFieldStyle(.roundedBorder)
+        SessionSearchField(text: $store.query, focusRequest: store.searchFocusRequest,
+                           moveSelection: { store.moveSelection($0) },
+                           activateSelection: { if store.focusSelectedSession() { onClose() } },
+                           closePanel: onClose)
+            .frame(height: 24)
+            .help("↑ ↓ 선택 · Enter 이동 · Esc 닫기")
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
     }
