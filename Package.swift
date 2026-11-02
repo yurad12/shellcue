@@ -33,6 +33,10 @@ let package = Package(
         .testTarget(
             name: "ShellCueCoreTests",
             dependencies: ["ShellCueCore"]
+        ),
+        .testTarget(
+            name: "ShellCueAppTests",
+            dependencies: ["ShellCueApp", "ShellCueCore"]
         )
     ]
 )
