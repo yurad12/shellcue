@@ -13,6 +13,7 @@ public struct AppleTerminalAdapter: TerminalAdapter {
         let output = try runner.run(Self.discoveryScript)
         let records = try AppleScriptRecordParser.parse(output, fields: 5)
         let processContexts = TTYProcessInspector().contexts(for: records.map { $0[2] })
+        let lifetimes = TerminalLifetime.read()
 
         return try records.map { fields in
             guard let windowID = Int(fields[0]), let tabIndex = Int(fields[1]) else {
@@ -27,10 +28,11 @@ public struct AppleTerminalAdapter: TerminalAdapter {
                 terminal: .appleTerminal,
                 windowID: windowID,
                 tabIndex: tabIndex,
-                tty: tty
+                tty: tty,
+                lifetimeID: lifetimes[tty]
             )
             return TerminalSessionSnapshot(
-                id: "terminal:\(windowID):\(tabIndex):\(tty)",
+                id: target.annotationID ?? "terminal:unverified:\(tty)",
                 target: target,
                 title: title,
                 state: state,
@@ -42,19 +44,28 @@ public struct AppleTerminalAdapter: TerminalAdapter {
 
     public func focus(_ target: TerminalTarget) throws {
         guard target.terminal == kind,
-              let windowID = target.windowID,
-              let tabIndex = target.tabIndex else {
+              let lifetimeID = target.lifetimeID,
+              TerminalLifetime.read()[target.tty] == lifetimeID else {
             throw TerminalAdapterError.invalidTarget
         }
 
-        _ = try runner.run("""
+        let result = try runner.run("""
+        if application "Terminal" is not running then return "missing"
         tell application "Terminal"
-            activate
-            set targetWindow to first window whose id is \(windowID)
-            set selected tab of targetWindow to tab \(tabIndex) of targetWindow
-            set frontmost of targetWindow to true
+            repeat with targetWindow in windows
+                repeat with targetTab in tabs of targetWindow
+                    if tty of targetTab is "\(appleScriptLiteral(target.tty))" then
+                        set selected tab of targetWindow to targetTab
+                        set frontmost of targetWindow to true
+                        activate
+                        return "focused"
+                    end if
+                end repeat
+            end repeat
         end tell
+        return "missing"
         """)
+        guard result == "focused" else { throw TerminalAdapterError.invalidTarget }
     }
 
     private static let discoveryScript = """

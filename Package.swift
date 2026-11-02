@@ -1,6 +1,11 @@
 // swift-tools-version: 6.1
 
+import Foundation
 import PackageDescription
+
+let packageDirectory = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()
+    .path
 
 let package = Package(
     name: "ShellCue",
@@ -15,7 +20,15 @@ let package = Package(
         .target(name: "ShellCueCore"),
         .executableTarget(
             name: "ShellCueApp",
-            dependencies: ["ShellCueCore"]
+            dependencies: ["ShellCueCore"],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "\(packageDirectory)/Config/ShellCue-Info.plist"
+                ])
+            ]
         ),
         .testTarget(
             name: "ShellCueCoreTests",
@@ -23,4 +36,3 @@ let package = Package(
         )
     ]
 )
-

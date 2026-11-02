@@ -1,22 +1,51 @@
+import AppKit
 import SwiftUI
 import ShellCueCore
 
-@main
 struct ShellCueApp: App {
-    @State private var store = SessionStore()
+    @NSApplicationDelegateAdaptor(ShellCueAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("ShellCue", systemImage: "terminal.fill") {
-            SessionListView(store: store)
-                .frame(width: 420, height: 520)
-                .task {
-                    while !Task.isCancelled {
-                        store.refresh()
-                        try? await Task.sleep(for: .seconds(2))
-                    }
+        Settings { EmptyView() }
+    }
+}
+
+@MainActor
+private final class ShellCueAppDelegate: NSObject, NSApplicationDelegate {
+    private let store = SessionStore()
+    private let popover = NSPopover()
+    private var statusItem: NSStatusItem?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let content = SessionListView(store: store)
+            .frame(width: 420, height: 520)
+            .task {
+                while !Task.isCancelled {
+                    self.store.refresh()
+                    try? await Task.sleep(for: .seconds(2))
                 }
+            }
+        popover.contentSize = NSSize(width: 420, height: 520)
+        popover.contentViewController = NSHostingController(rootView: content)
+        // The system character viewer temporarily moves focus away. A transient
+        // popover would close before the selected emoji reaches the text view.
+        popover.behavior = .applicationDefined
+
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.image = NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: "ShellCue")
+        item.button?.target = self
+        item.button?.action = #selector(togglePopover)
+        statusItem = item
+    }
+
+    @objc private func togglePopover() {
+        guard let button = statusItem?.button else { return }
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
         }
-        .menuBarExtraStyle(.window)
     }
 }
 
@@ -31,8 +60,14 @@ final class SessionStore {
     var projectsBySessionID: [String: DetectedProject] = [:]
     var annotations: [String: SessionAnnotation] = [:]
     var query = ""
-    var errorMessage: String?
+    private(set) var refreshErrorMessage: String?
+    private(set) var operationErrorMessage: String?
+    private(set) var deniedTerminalKinds: Set<TerminalKind> = []
     var isRefreshing = false
+
+    var errorMessage: String? {
+        operationErrorMessage ?? refreshErrorMessage
+    }
 
     init(
         adapters: [any TerminalAdapter] = [AppleTerminalAdapter(), ITermAdapter()],
@@ -45,7 +80,7 @@ final class SessionStore {
         do {
             annotations = try annotationStore.load()
         } catch {
-            errorMessage = "저장된 이름과 메모를 불러오지 못했습니다: \(error.localizedDescription)"
+            operationErrorMessage = "저장된 이름과 메모를 불러오지 못했습니다: \(error.localizedDescription)"
         }
     }
 
@@ -84,7 +119,8 @@ final class SessionStore {
     }
 
     func annotation(for session: TerminalSessionSnapshot) -> SessionAnnotation {
-        annotations[session.id] ?? SessionAnnotation()
+        guard let key = session.target.annotationID else { return SessionAnnotation() }
+        return annotations[key] ?? SessionAnnotation()
     }
 
     func displayTitle(for session: TerminalSessionSnapshot) -> String {
@@ -101,23 +137,31 @@ final class SessionStore {
         for session: TerminalSessionSnapshot,
         purpose: String,
         nextAction: String
-    ) {
+    ) -> Bool {
+        guard let key = session.target.annotationID else {
+            operationErrorMessage = "세션을 식별할 수 없어 저장하지 않았습니다. 새로고침 후 다시 시도하세요."
+            return false
+        }
         let cleanedPurpose = purpose.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanedNextAction = nextAction.trimmingCharacters(in: .whitespacesAndNewlines)
+        var updated = annotations
         if cleanedPurpose.isEmpty && cleanedNextAction.isEmpty {
-            annotations.removeValue(forKey: session.id)
+            updated.removeValue(forKey: key)
         } else {
-            annotations[session.id] = SessionAnnotation(
+            updated[key] = SessionAnnotation(
                 purpose: cleanedPurpose,
                 nextAction: cleanedNextAction
             )
         }
 
         do {
-            try annotationStore.save(annotations)
-            errorMessage = nil
+            try annotationStore.save(updated)
+            annotations = updated
+            operationErrorMessage = nil
+            return true
         } catch {
-            errorMessage = "이름과 메모를 저장하지 못했습니다: \(error.localizedDescription)"
+            operationErrorMessage = "이름과 메모를 저장하지 못했습니다: \(error.localizedDescription)"
+            return false
         }
     }
 
@@ -125,25 +169,46 @@ final class SessionStore {
         isRefreshing = true
         defer { isRefreshing = false }
 
-        do {
-            sessions = try adapters.values.flatMap { try $0.discoverSessions() }
-            projectsBySessionID = Dictionary(uniqueKeysWithValues: sessions.compactMap { session in
-                guard let workingDirectory = session.workingDirectory else { return nil }
-                return (session.id, projectDetector.detect(from: workingDirectory))
-            })
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
+        var discoveredSessions: [TerminalSessionSnapshot] = []
+        var errors: [String] = []
+        var deniedKinds: Set<TerminalKind> = []
+
+        for kind in TerminalKind.allCases {
+            guard let adapter = adapters[kind] else { continue }
+            do {
+                discoveredSessions.append(contentsOf: try adapter.discoverSessions())
+            } catch {
+                errors.append("\(kind.displayName): \(error.localizedDescription)")
+                if let adapterError = error as? TerminalAdapterError,
+                   case .automationPermissionDenied = adapterError {
+                    deniedKinds.insert(kind)
+                }
+            }
         }
+
+        sessions = discoveredSessions
+        projectsBySessionID = Dictionary(uniqueKeysWithValues: sessions.compactMap { session in
+            guard let workingDirectory = session.workingDirectory else { return nil }
+            return (session.id, projectDetector.detect(from: workingDirectory))
+        })
+        deniedTerminalKinds = deniedKinds
+        refreshErrorMessage = errors.isEmpty ? nil : errors.joined(separator: "\n")
     }
 
     func focus(_ session: TerminalSessionSnapshot) {
         do {
             try adapters[session.target.terminal]?.focus(session.target)
-            errorMessage = nil
+            operationErrorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            operationErrorMessage = error.localizedDescription
         }
+    }
+
+    func openAutomationSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
+        ) else { return }
+        NSWorkspace.shared.open(url)
     }
 }
 
@@ -167,15 +232,19 @@ private struct SessionListView: View {
                     annotation: store.annotation(for: editingSession),
                     onCancel: { self.editingSession = nil },
                     onSave: { purpose, nextAction in
-                        store.saveAnnotation(
+                        if store.saveAnnotation(
                             for: editingSession,
                             purpose: purpose,
                             nextAction: nextAction
-                        )
-                        self.editingSession = nil
+                        ) {
+                            self.editingSession = nil
+                        }
                     },
                     onFocus: { store.focus(editingSession) }
                 )
+                if let errorMessage = store.operationErrorMessage {
+                    errorBanner(errorMessage)
+                }
             } else {
                 sessionList
             }
@@ -193,11 +262,7 @@ private struct SessionListView: View {
             }
 
             if store.filteredSessions.isEmpty {
-                ContentUnavailableView(
-                    "열린 터미널이 없어요",
-                    systemImage: "terminal",
-                    description: Text("Terminal이나 iTerm2에서 세션을 열고 새로고침하세요.")
-                )
+                emptyState
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
@@ -209,6 +274,30 @@ private struct SessionListView: View {
                     .padding(.vertical, 10)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        if !store.deniedTerminalKinds.isEmpty {
+            ContentUnavailableView {
+                Label(
+                    "터미널 접근 권한이 필요해요",
+                    systemImage: "lock.trianglebadge.exclamationmark"
+                )
+            } description: {
+                Text("시스템 설정에서 ShellCue의 자동화 접근을 허용한 뒤 새로고침하세요.")
+            } actions: {
+                Button("자동화 설정 열기") {
+                    store.openAutomationSettings()
+                }
+            }
+        } else {
+            ContentUnavailableView(
+                "열린 터미널이 없어요",
+                systemImage: "terminal",
+                description: Text("Terminal이나 iTerm2에서 세션을 열고 새로고침하세요.")
+            )
         }
     }
 
@@ -311,6 +400,12 @@ private struct SessionListView: View {
             Image(systemName: "exclamationmark.triangle")
             Text(message)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            if !store.deniedTerminalKinds.isEmpty {
+                Button("설정 열기") {
+                    store.openAutomationSettings()
+                }
+                .buttonStyle(.link)
+            }
         }
         .font(.callout)
         .foregroundStyle(.orange)
@@ -438,13 +533,12 @@ private struct SessionEditorView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text("다음 할 일 · 메모")
                     .font(.subheadline.weight(.semibold))
-                TextField(
-                    "예: 모바일 화면 확인 후 커밋하고 리뷰 요청",
-                    text: $nextAction,
-                    axis: .vertical
-                )
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(4...7)
+                TextEditor(text: $nextAction)
+                    .font(.body)
+                    .frame(height: 125)
+                    .padding(4)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.secondary.opacity(0.3)))
+                    .accessibilityLabel("다음 할 일 · 메모")
                 Text("여러 줄로 적을 수 있으며 목록에는 두 줄까지 표시됩니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

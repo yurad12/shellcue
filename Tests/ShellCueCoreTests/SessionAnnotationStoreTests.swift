@@ -10,8 +10,8 @@ final class SessionAnnotationStoreTests: XCTestCase {
         let store = SessionAnnotationStore(fileURL: directory.appendingPathComponent("annotations.json"))
         let annotations = [
             "iterm:session-1": SessionAnnotation(
-                purpose: "Docker 로그",
-                nextAction: "오류가 다시 나면 로그 저장",
+                purpose: "🐳 Docker 로그 👩🏽‍💻",
+                nextAction: "오류가 다시 나면 로그 저장\n\n✅ 확인 후 커밋\n다음 작업 🛠️",
                 modifiedAt: Date(timeIntervalSince1970: 1_700_000_000)
             )
         ]

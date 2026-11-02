@@ -2,6 +2,7 @@ import Foundation
 
 public enum TerminalAdapterError: LocalizedError {
     case scriptCreationFailed
+    case automationPermissionDenied
     case scriptFailed(String)
     case malformedOutput(String)
     case invalidTarget
@@ -10,12 +11,14 @@ public enum TerminalAdapterError: LocalizedError {
         switch self {
         case .scriptCreationFailed:
             "AppleScript를 만들 수 없습니다."
+        case .automationPermissionDenied:
+            "자동화 접근이 거부됐습니다. 시스템 설정의 개인정보 보호 및 보안 > 자동화에서 ShellCue의 접근을 확인한 뒤 앱을 다시 실행하세요."
         case .scriptFailed(let message):
             "터미널 연결에 실패했습니다: \(message)"
         case .malformedOutput(let output):
             "터미널이 예상하지 못한 데이터를 반환했습니다: \(output)"
         case .invalidTarget:
-            "이 터미널 세션의 위치 정보가 올바르지 않습니다."
+            "세션이 닫혔거나 같은 세션인지 확인할 수 없습니다. 새로고침 후 다시 선택하세요."
         }
     }
 }
@@ -32,6 +35,10 @@ public struct AppleScriptRunner {
         var error: NSDictionary?
         let result = script.executeAndReturnError(&error)
         if let error {
+            if let errorNumber = error[NSAppleScript.errorNumber] as? NSNumber,
+               errorNumber.intValue == -1743 {
+                throw TerminalAdapterError.automationPermissionDenied
+            }
             let message = (error[NSAppleScript.errorMessage] as? String)
                 ?? error.description
             throw TerminalAdapterError.scriptFailed(message)
@@ -65,4 +72,3 @@ func appleScriptLiteral(_ value: String) -> String {
         .replacingOccurrences(of: "\r", with: " ")
         .replacingOccurrences(of: "\n", with: " ")
 }
-

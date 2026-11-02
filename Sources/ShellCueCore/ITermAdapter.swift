@@ -51,9 +51,9 @@ public struct ITermAdapter: TerminalAdapter {
         }
         let escapedSessionID = appleScriptLiteral(sessionID)
 
-        _ = try runner.run("""
+        let result = try runner.run("""
+        if application "iTerm2" is not running then return "missing"
         tell application "iTerm2"
-            activate
             repeat with terminalWindow in windows
                 repeat with terminalTab in tabs of terminalWindow
                     repeat with terminalSession in sessions of terminalTab
@@ -61,13 +61,16 @@ public struct ITermAdapter: TerminalAdapter {
                             select terminalSession
                             select terminalTab
                             select terminalWindow
-                            return
+                            activate
+                            return "focused"
                         end if
                     end repeat
                 end repeat
             end repeat
         end tell
+        return "missing"
         """)
+        guard result == "focused" else { throw TerminalAdapterError.invalidTarget }
     }
 
     private static let discoveryScript = """

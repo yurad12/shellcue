@@ -32,19 +32,33 @@ public struct TerminalTarget: Hashable, Codable, Sendable {
     public let tabIndex: Int?
     public let sessionID: String?
     public let tty: String
+    public let lifetimeID: String?
 
     public init(
         terminal: TerminalKind,
         windowID: Int? = nil,
         tabIndex: Int? = nil,
         sessionID: String? = nil,
-        tty: String
+        tty: String,
+        lifetimeID: String? = nil
     ) {
         self.terminal = terminal
         self.windowID = windowID
         self.tabIndex = tabIndex
         self.sessionID = sessionID
         self.tty = tty
+        self.lifetimeID = lifetimeID
+    }
+
+    public var annotationID: String? {
+        switch terminal {
+        case .iTerm2:
+            guard let sessionID, !sessionID.isEmpty else { return nil }
+            return "iterm:\(sessionID)"
+        case .appleTerminal:
+            guard let lifetimeID else { return nil }
+            return "terminal:v2:\(tty):\(lifetimeID)"
+        }
     }
 }
 

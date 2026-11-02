@@ -35,4 +35,7 @@ PLIST
 /usr/bin/ditto "$app" "$output_dir/ShellCue.app"
 archive="$output_dir/ShellCue-0.1.0-$architecture.zip"
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$app" "$archive"
-printf 'App: %s\nZIP: %s\nLocal test build: not notarized.\n' "$output_dir/ShellCue.app" "$archive"
+printf 'App: %s\nZIP: %s\n' "$output_dir/ShellCue.app" "$archive"
+printf 'Run locally: open -n "%s"\n' "$output_dir/ShellCue.app"
+printf 'ShellCue opens in the menu bar; it has no Dock icon or regular launch window.\n'
+printf 'Local test build only: ad-hoc signed and not notarized. Downloaded copies may be blocked by Gatekeeper.\n'

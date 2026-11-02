@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>ShellCue</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.shellcue.app</string>
+    <key>CFBundleName</key>
+    <string>ShellCue</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>열린 터미널 세션을 표시하고 선택한 세션으로 이동하기 위해 Terminal과 iTerm2에 접근합니다.</string>
+</dict>
+</plist>
