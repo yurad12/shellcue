@@ -1,20 +1,20 @@
-# ShellCue 작업 지침
+# Working on ShellCue
 
-ShellCue는 이미 열려 있는 Terminal과 iTerm2 세션을 찾고, 하던 일로 돌아가기 쉽게 만드는 메뉴 막대 앱이다. 기능을 추가할 때도 이 흐름이 더 간단해지는지 먼저 본다.
+ShellCue is a menu bar app that helps people find open Terminal and iTerm2 sessions and return to their work. When adding a feature, check whether it makes this easier.
 
-## 지킬 것
+## Keep these rules
 
-- 사용자가 정한 이름과 메모는 자동 추정으로 덮어쓰지 않는다.
-- 상태나 세션 연결을 확인할 수 없으면 추측해서 표시하거나 이동하지 않는다.
-- 터미널 출력과 민감한 명령 인자를 저장하지 않는다. 데이터는 로컬에 둔다.
-- 한 터미널 연동의 실패가 다른 터미널의 세션까지 숨기지 않게 한다.
-- 별도 셸 스크립트 설치를 요구하지 않는다. 명령 성공·실패 이력 수집은 범위에 넣지 않는다.
-- 터미널별 발견·이동 처리는 어댑터로 분리한다. 자체 터미널, 명령 실행·종료, SSH·tmux 내부 제어는 현재 범위 밖이다.
+- Never replace a user's name or note with an automatic guess.
+- If you cannot confirm a session's state or identity, do not guess its state or switch to an unverified session.
+- Do not save terminal output or sensitive command arguments. Keep data on the user's Mac.
+- A failure in one terminal app must not hide sessions from the other app.
+- Do not require extra shell scripts. Collecting command success and failure history is outside the current scope.
+- Keep session discovery and switching in separate adapters for each terminal app. Building a terminal, running or stopping commands, and controlling sessions inside SSH or tmux are outside the current scope.
 
-## 작업할 때
+## When making changes
 
-- 사용법과 개발 명령은 `README.md`, 남은 일은 `docs/BACKLOG.md`를 본다.
-- 한 번에 해결할 문제를 정하고, 동작을 바꾸면 관련 설명도 함께 고친다.
-- 로직 변경에는 필요한 테스트를 추가하고, 마무리 전에 `swift test`를 실행한다.
-- 터미널 연동과 UI는 실제 앱에서도 확인한다. 테스트 통과와 실제 동작 확인을 구분해서 보고한다.
-- README에는 제품 소개와 사용법만 둔다. 남은 일은 BACKLOG에 적고, 끝난 작업과 세부 변경 이력은 Git에 남긴다.
+- Read `README.md` for usage and development commands, and `docs/BACKLOG.md` for remaining work.
+- Work on one problem at a time. When behavior changes, update the related instructions too.
+- Add tests where needed for logic changes. Run `swift test` before finishing.
+- Check terminal connections and UI changes in the actual app. Report test results and real app checks separately.
+- Keep the README focused on the product and how to use it. Keep remaining work in BACKLOG, in Korean. Use Git for completed work and change history.
