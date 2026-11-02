@@ -13,7 +13,11 @@ ShellCue needs macOS 14 or later. Each ZIP supports the same chip type as the Ma
 3. Open a session in Terminal or iTerm2. When ShellCue asks to control your terminal app, allow access to the app you use.
 4. Click a session to go to it, or click its edit button to add a name and note. Press `⌘S` to save.
 
-Click the menu bar icon again to close the panel. To quit, open the menu on the right side of the panel and choose **ShellCue 종료** (Quit ShellCue). The app currently uses Korean labels.
+Click the menu bar icon again, press Esc, or click outside to close the panel. The emoji picker stays open for input. The panel also closes after a successful switch to a terminal.
+
+Closing the panel keeps your draft while ShellCue is running. Reopen the panel to keep editing. Save with `⌘S`, or choose **취소** (Cancel) to discard the draft. Unsaved drafts do not survive quitting the app. The list shows up to two lines of a saved note.
+
+To quit, open the menu on the right side of the panel and choose **ShellCue 종료** (Quit ShellCue). The app currently uses Korean labels.
 
 If sessions are missing and you see a permission message, check **System Settings → Privacy & Security → Automation → ShellCue** and allow access to your terminal app.
 
