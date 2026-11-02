@@ -15,9 +15,10 @@ private final class ShellCueAppDelegate: NSObject, NSApplicationDelegate {
     private let store = SessionStore()
     private let popover = NSPopover()
     private var statusItem: NSStatusItem?
+    private var outsideClickMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let content = SessionListView(store: store)
+        let content = SessionListView(store: store, onClose: { [weak self] in self?.closePopover() })
             .frame(width: 420, height: 520)
             .task {
                 while !Task.isCancelled {
@@ -36,12 +37,45 @@ private final class ShellCueAppDelegate: NSObject, NSApplicationDelegate {
         item.button?.target = self
         item.button?.action = #selector(togglePopover)
         statusItem = item
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] event in
+            let windowID = CGWindowID(event.cgEvent?.getIntegerValueField(
+                .mouseEventWindowUnderMousePointer
+            ) ?? 0)
+            Task { @MainActor in
+                guard let self, self.popover.isShown else { return }
+                // The system emoji viewer belongs to a separate process.
+                // Its clicks must still reach the editor behind it.
+                guard !self.isCharacterViewerClick(windowID: windowID) else { return }
+                self.closePopover()
+            }
+        }
+    }
+
+    private func isCharacterViewerClick(windowID: CGWindowID) -> Bool {
+        // The compact viewer need not be the frontmost app. Check the clicked
+        // window's owner as well, without reading window titles or contents.
+        if windowID != 0,
+           let windows = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID) as? [[String: Any]],
+           let pid = windows.first?[kCGWindowOwnerPID as String] as? Int32 {
+            return NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == "com.apple.CharacterPaletteIM"
+        }
+        return NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.CharacterPaletteIM"
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
+    }
+
+    private func closePopover() {
+        popover.performClose(nil)
     }
 
     @objc private func togglePopover() {
         guard let button = statusItem?.button else { return }
         if popover.isShown {
-            popover.performClose(nil)
+            closePopover()
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
@@ -60,6 +94,7 @@ final class SessionStore {
     var projectsBySessionID: [String: DetectedProject] = [:]
     var annotations: [String: SessionAnnotation] = [:]
     var query = ""
+    var editingDraft: SessionEditingDraft?
     private(set) var refreshErrorMessage: String?
     private(set) var operationErrorMessage: String?
     private(set) var deniedTerminalKinds: Set<TerminalKind> = []
@@ -67,6 +102,25 @@ final class SessionStore {
 
     var errorMessage: String? {
         operationErrorMessage ?? refreshErrorMessage
+    }
+
+    func beginEditing(_ session: TerminalSessionSnapshot) {
+        guard editingDraft == nil else { return }
+        editingDraft = SessionEditingDraft(session: session, annotation: annotation(for: session))
+    }
+
+    func cancelEditing() {
+        editingDraft = nil
+        operationErrorMessage = nil
+    }
+
+    @discardableResult
+    func saveEditing() -> Bool {
+        guard let draft = editingDraft,
+              saveAnnotation(for: draft.session, purpose: draft.purpose, nextAction: draft.nextAction)
+        else { return false }
+        editingDraft = nil
+        return true
     }
 
     init(
@@ -195,12 +249,18 @@ final class SessionStore {
         refreshErrorMessage = errors.isEmpty ? nil : errors.joined(separator: "\n")
     }
 
-    func focus(_ session: TerminalSessionSnapshot) {
+    @discardableResult
+    func focus(_ session: TerminalSessionSnapshot) -> Bool {
         do {
-            try adapters[session.target.terminal]?.focus(session.target)
+            guard let adapter = adapters[session.target.terminal] else {
+                throw TerminalAdapterError.invalidTarget
+            }
+            try adapter.focus(session.target)
             operationErrorMessage = nil
+            return true
         } catch {
             operationErrorMessage = error.localizedDescription
+            return false
         }
     }
 
@@ -209,6 +269,20 @@ final class SessionStore {
             string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
         ) else { return }
         NSWorkspace.shared.open(url)
+    }
+}
+
+@MainActor
+@Observable
+final class SessionEditingDraft {
+    let session: TerminalSessionSnapshot
+    var purpose: String
+    var nextAction: String
+
+    init(session: TerminalSessionSnapshot, annotation: SessionAnnotation) {
+        self.session = session
+        purpose = annotation.purpose
+        nextAction = annotation.nextAction
     }
 }
 
@@ -222,25 +296,16 @@ struct SessionGroup: Identifiable {
 
 private struct SessionListView: View {
     @Bindable var store: SessionStore
-    @State private var editingSession: TerminalSessionSnapshot?
+    let onClose: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            if let editingSession {
+            if let draft = store.editingDraft {
                 SessionEditorView(
-                    session: editingSession,
-                    annotation: store.annotation(for: editingSession),
-                    onCancel: { self.editingSession = nil },
-                    onSave: { purpose, nextAction in
-                        if store.saveAnnotation(
-                            for: editingSession,
-                            purpose: purpose,
-                            nextAction: nextAction
-                        ) {
-                            self.editingSession = nil
-                        }
-                    },
-                    onFocus: { store.focus(editingSession) }
+                    draft: draft,
+                    onCancel: { store.cancelEditing() },
+                    onSave: { store.saveEditing() },
+                    onFocus: { if store.focus(draft.session) { onClose() } }
                 )
                 if let errorMessage = store.operationErrorMessage {
                     errorBanner(errorMessage)
@@ -249,6 +314,7 @@ private struct SessionListView: View {
                 sessionList
             }
         }
+        .onExitCommand(perform: onClose)
     }
 
     private var sessionList: some View {
@@ -335,7 +401,7 @@ private struct SessionListView: View {
     private func sessionRow(_ session: TerminalSessionSnapshot) -> some View {
         HStack(spacing: 2) {
             Button {
-                store.focus(session)
+                if store.focus(session) { onClose() }
             } label: {
                 SessionRow(
                     session: session,
@@ -346,7 +412,7 @@ private struct SessionListView: View {
             .buttonStyle(.plain)
 
             Button {
-                editingSession = session
+                store.beginEditing(session)
             } label: {
                 Image(systemName: "square.and.pencil")
                     .foregroundStyle(.secondary)
@@ -432,7 +498,7 @@ private struct SessionRow: View {
                     Text("↳ \(nextAction)")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 } else {
                     Text(sessionDetails)
                         .font(.system(size: 11))
@@ -482,28 +548,12 @@ private struct SessionRow: View {
 }
 
 private struct SessionEditorView: View {
-    let session: TerminalSessionSnapshot
+    @Bindable var draft: SessionEditingDraft
     let onCancel: () -> Void
-    let onSave: (String, String) -> Void
+    let onSave: () -> Void
     let onFocus: () -> Void
 
-    @State private var purpose: String
-    @State private var nextAction: String
-
-    init(
-        session: TerminalSessionSnapshot,
-        annotation: SessionAnnotation,
-        onCancel: @escaping () -> Void,
-        onSave: @escaping (String, String) -> Void,
-        onFocus: @escaping () -> Void
-    ) {
-        self.session = session
-        self.onCancel = onCancel
-        self.onSave = onSave
-        self.onFocus = onFocus
-        _purpose = State(initialValue: annotation.purpose)
-        _nextAction = State(initialValue: annotation.nextAction)
-    }
+    private var session: TerminalSessionSnapshot { draft.session }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -523,7 +573,7 @@ private struct SessionEditorView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text("용도 이름")
                     .font(.subheadline.weight(.semibold))
-                TextField("예: 프론트 개발 서버", text: $purpose)
+                TextField("예: 프론트 개발 서버", text: $draft.purpose)
                     .textFieldStyle(.roundedBorder)
                 Text("비워두면 명령이나 세션 번호로 자동 표시합니다.")
                     .font(.caption)
@@ -533,7 +583,7 @@ private struct SessionEditorView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text("다음 할 일 · 메모")
                     .font(.subheadline.weight(.semibold))
-                TextEditor(text: $nextAction)
+                TextEditor(text: $draft.nextAction)
                     .font(.body)
                     .frame(height: 125)
                     .padding(4)
@@ -568,9 +618,7 @@ private struct SessionEditorView: View {
                 Button("터미널로 이동", action: onFocus)
                 Spacer()
                 Button("취소", action: onCancel)
-                Button("저장") {
-                    onSave(purpose, nextAction)
-                }
+                Button("저장", action: onSave)
                 .keyboardShortcut("s", modifiers: .command)
             }
         }
