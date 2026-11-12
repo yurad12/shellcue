@@ -4,6 +4,12 @@ When you have many terminals open, it can be hard to remember what each one is f
 
 Sessions are grouped by working folder. Click a session to return to its tab or split pane. You can search names and notes, and use multiple lines and emoji in notes.
 
+## Preview
+
+![ShellCue menu bar panel showing iTerm2 sessions grouped by project, with search, running status, and notes](docs/images/shellcue-menu-bar.png)
+
+Open the panel from the menu bar or with **Control + Option + Space**. Search by project, session name, or note, then select a result to jump back to its terminal.
+
 ## Install and use
 
 ShellCue needs macOS 14 or later. Each ZIP supports the same chip type as the Mac that built it: Apple Silicon or Intel.
