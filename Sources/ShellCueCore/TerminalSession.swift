@@ -3,11 +3,13 @@ import Foundation
 public enum TerminalKind: String, Codable, CaseIterable, Sendable {
     case appleTerminal
     case iTerm2
+    case vscode
 
     public var displayName: String {
         switch self {
         case .appleTerminal: "Terminal"
         case .iTerm2: "iTerm2"
+        case .vscode: "VS Code"
         }
     }
 }
@@ -52,6 +54,9 @@ public struct TerminalTarget: Hashable, Codable, Sendable {
 
     public var annotationID: String? {
         switch terminal {
+        case .vscode:
+            guard let sessionID, let lifetimeID else { return nil }
+            return "vscode:\(lifetimeID):\(sessionID)"
         case .iTerm2:
             guard let sessionID, !sessionID.isEmpty else { return nil }
             return "iterm:\(sessionID)"
