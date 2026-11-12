@@ -171,7 +171,7 @@ final class SessionStore {
     }
 
     init(
-        adapters: [any TerminalAdapter] = [AppleTerminalAdapter(), ITermAdapter()],
+        adapters: [any TerminalAdapter] = [AppleTerminalAdapter(), ITermAdapter(), VSCodeAdapter()],
         annotationStore: SessionAnnotationStore = SessionAnnotationStore(),
         projectDetector: ProjectDetector = ProjectDetector()
     ) {
@@ -231,6 +231,7 @@ final class SessionStore {
     func displayTitle(for session: TerminalSessionSnapshot) -> String {
         let purpose = annotation(for: session).purpose
         guard purpose.isEmpty else { return purpose }
+        if session.target.terminal == .vscode { return session.title }
         guard let path = session.workingDirectory, !path.isEmpty else { return session.title }
 
         let ttyName = URL(fileURLWithPath: session.target.tty).lastPathComponent
