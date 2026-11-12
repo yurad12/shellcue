@@ -61,3 +61,15 @@ The files are saved as `dist/ShellCue.app` and `dist/ShellCue-0.1.0-<architectur
 To check the terminal connection, quit ShellCue and run `swift run ShellCue --diagnose`. The results are saved in `shellcue-diagnostics.log` in the build folder.
 
 See [AGENTS.md](AGENTS.md) for project rules and [BACKLOG.md](docs/BACKLOG.md) for upcoming work. The backlog is written in Korean.
+
+## Experimental VS Code bridge
+
+This prototype supports local macOS VS Code windows only. It does not support SSH, containers, or browser sessions. Launch a separate VS Code development window with the bridge loaded:
+
+```sh
+code --new-window --extensionDevelopmentPath="$PWD/extensions/vscode" .
+```
+
+Open integrated terminals in that development window, then restart ShellCue using the new build. Only windows with the extension loaded are indexed. No shell configuration changes are required. If VS Code shell integration provides no current folder, ShellCue does not substitute a guessed folder. The bridge observes command activity without storing command text or output. Existing running commands and inactive shell integration can result in an unknown state.
+
+This prototype exchanges snapshots and focus requests in `~/Library/Application Support/ShellCue/vscode` with fresh random window and terminal IDs on extension activation. Notes persist only while those IDs survive; reload/restart reconnection is not supported yet. It is a local file prototype, not the planned Unix socket transport. Focus requests expire and require an acknowledgment; a failure does not redirect to another terminal. Focus acknowledgment confirms the extension called the show operation, not an independent OS-level focus verification. The current synchronous adapter may pause the panel for up to 1.5 seconds while waiting. Do not distribute this experimental bridge as production-ready.
